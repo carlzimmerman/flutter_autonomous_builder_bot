@@ -1,0 +1,31 @@
+
+
+# Skip dart analysis
+SKIP_DART_ANALYSIS = True
+USE_DART_VALIDATOR = False
+
+
+# OPEN SOURCE MODELS
+
+# OLLAMA_MODEL = "deepseek-coder-v2"
+# OLLAMA_MODEL = "gemma2:27b"
+# OLLAMA_MODEL = "codegeex4"
+# OLLAMA_MODEL = "llama3.1"
+# OLLAMA_MODEL = "mannix/llama3.1-storm"
+# OLLAMA_MODEL = "qwen2.5:14b"
+# OLLAMA_MODEL = "codestral"
+# OLLAMA_MODEL = "dolphin-llama3"
+# OLLAMA_MODEL = "CognitiveComputations/dolphin-llama3.1:latest"
+# OLLAMA_MODEL = "yi-coder"
+# OLLAMA_MODEL = "llama3.2"
+OLLAMA_MODEL = "qwen2.5-coder"
+
+
+
+# GOOGLE GEMINI API
+#pip install google-generativeai
+
+
+USE_GEMINI_API = False  # Set to True to use Gemini API instead of Ollama
+GEMINI_API_KEY = ""  # Replace this with Gemini API key
+GEMINI_MODEL = 'gemini-1.5-pro'

@@ -1,0 +1,28 @@
+# Python cache files
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+config.py
+
+# System files
+.DS_Store
+
+# Logs
+*.log
+
+# Project state
+.flutter_bot_state
+
+# Flutter/Dart specific
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+
+# IDE specific
+.idea/
+.vscode/
+*.iml
