@@ -42,10 +42,10 @@ pip install -r requirements.txt
 ollama serve
 
 2. Run the bot:
-3. 
+
 python main.py
 
-4. Follow the prompts to:
+3. Follow the prompts to:
    - Create new or select existing Flutter project
    - Input development tasks in natural language
 
