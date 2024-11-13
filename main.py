@@ -24,6 +24,22 @@ from config import SKIP_DART_ANALYSIS, USE_GEMINI_API, USE_DART_VALIDATOR
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def safe_validate_code(flutter_validator, original_content: str, new_content: str, file_path: str) -> bool:
+    """Safely validate code changes when validator might be disabled"""
+    if not flutter_validator:
+        logger.info("Code validation disabled - accepting changes")
+        return True
+
+    try:
+        integrity_check = flutter_validator.verify_code_integrity(
+            original_content,
+            new_content,
+            file_path
+        )
+        return integrity_check['integrity_maintained']
+    except Exception as e:
+        logger.error(f"Error during code validation: {str(e)}")
+        return True
 
 def save_project_state(project_files: Dict[str, str], project_root: str):
     state_file = os.path.join(project_root, '.flutter_bot_state')
@@ -203,17 +219,20 @@ def development_loop(client: AIClient, project_root: str, flutter_process: subpr
                         validated_content = flutter_validator.validate_and_fix_dart_code(content, file_path)
 
                     if file_path in project_context_manager.file_contents:
-                        integrity_check = flutter_validator.verify_code_integrity(
-                            project_context_manager.file_contents[file_path],
+                        if safe_validate_code(
+                            flutter_validator,
+                            project_context_manager.file_contents.get(file_path, ""),
                             validated_content,
                             file_path
-                        )
-                        if not integrity_check['integrity_maintained']:
-                            logger.warning(f"Code integrity issue in {file_path}: {integrity_check['explanation']}")
-                            print(f"Warning: Potential code integrity issue in {file_path}. Please review the changes.")
-
-                    project_context_manager.update_file(file_path, validated_content)
-                    logger.info(f"{'Created' if step['type'] == 'create_file' else 'Updated'} file: {file_path}")
+                        ):
+                            project_context_manager.update_file(file_path, validated_content)
+                            logger.info(f"{'Created' if step['type'] == 'create_file' else 'Updated'} file: {file_path}")
+                        else:
+                            logger.warning(f"Skipping update to {file_path} due to integrity check failure")
+                    else:
+                        # New file creation
+                        project_context_manager.update_file(file_path, validated_content)
+                        logger.info(f"Created new file: {file_path}")
                 elif step['type'] == 'delete_file':
                     project_context_manager.delete_file(file_path)
                     logger.info(f"Deleted file: {file_path}")

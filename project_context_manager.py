@@ -35,6 +35,26 @@ class ProjectContextManager:
             f.write(content)
         self.update_context()
 
+
+    def delete_file(self, file_path: str):
+        """
+        Delete a file from the project and update the context.
+        """
+        try:
+            full_path = os.path.join(self.project_root, file_path)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+                if file_path in self.file_contents:
+                    del self.file_contents[file_path]
+                logger.info(f"Successfully deleted file: {file_path}")
+            else:
+                logger.warning(f"File not found for deletion: {file_path}")
+        except Exception as e:
+            logger.error(f"Error deleting file {file_path}: {str(e)}")
+            raise
+        finally:
+            self.update_context()
+
     def get_file_content(self, file_path: str) -> str:
         """
         Get the content of a file. If the file doesn't exist, return an empty string.

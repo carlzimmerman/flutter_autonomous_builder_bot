@@ -38,7 +38,18 @@ def create_flutter_project(project_name: str) -> str:
     # Construct the project_path using the original working directory
     project_path = os.path.join(original_working_directory, project_name)
 
-    # os.chdir(project_path)  # Remove this line to avoid changing the working directory
+    # Replace default main.dart with our template
+    template_path = os.path.join(original_working_directory, 'templates', 'default_main.dart')
+    main_dart_path = os.path.join(project_path, 'lib', 'main.dart')
+
+    try:
+        with open(template_path, 'r') as template_file:
+            template_content = template_file.read()
+        with open(main_dart_path, 'w') as main_file:
+            main_file.write(template_content)
+        print("Successfully replaced main.dart with template version")
+    except Exception as e:
+        print(f"Error replacing main.dart template: {str(e)}")
 
     return project_path
 

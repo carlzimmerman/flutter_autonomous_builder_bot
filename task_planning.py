@@ -16,39 +16,48 @@ class TaskPlanner:
 
     def generate_task_plan(self, user_input: str, current_project_files: Dict[str, str]) -> Dict[str, Any]:
         prompt = f"""
-        Generate a comprehensive task plan for the following Flutter development task:
+        Generate a task plan for the following Flutter development task:
 
         {user_input}
 
         Current project files:
         {json.dumps(list(current_project_files.keys()), indent=2)}
 
-        Follow this architecture for the app:
-        1. lib/main.dart: Main entry point of the app
-        2. lib/screens/: Contains individual screen widgets
-        3. lib/widgets/: Contains reusable custom widgets
-        4. lib/models/: Contains data models
-        5. lib/providers/: Contains state management providers
-        6. lib/services/: Contains business logic and API calls
+        The main.dart file uses a template with:
+        - MultiProvider wrapper for state management
+        - MaterialApp with initialRoute and named routes
+        - Standard Material theme configuration
 
-        Provide a detailed plan that includes the following:
-        1. Steps to create, update, or delete files
-        2. Changes to be made to existing files
-        3. Updates required for main.dart
-        4. Any new dependencies that need to be added
+        Project architecture:
+        1. lib/main.dart: Main entry point (using our template structure)
+        2. lib/screens/: Contains screen widgets
+        3. lib/widgets/: Reusable custom widgets
+        4. lib/models/: Data models
+        5. lib/providers/: State management providers
+        6. lib/services/: Business logic and API calls
 
-        Return the plan as a JSON object with the following structure:
+        Return a JSON plan that includes:
+        1. Steps to create/update/delete files
+        2. Main.dart updates (must follow template structure):
+           - New imports
+           - Route updates
+           - Provider initialization
+           - Initial route changes (if this is a home/landing screen)
+        3. Required dependencies
+
+        JSON structure:
         {{
             "steps": [
                 {{
                     "type": "create_file" | "update_file" | "delete_file",
                     "file_path": "path/to/file",
-                    "description": "Description of the file content or changes"
+                    "description": "Description of changes"
                 }}
             ],
             "update_main_dart": {{
                 "imports_to_add": ["package:flutter/material.dart"],
                 "routes_to_add": {{"/route_name": "WidgetName()"}},
+                "initial_route": "/route_name",  # If this is meant to be the home screen
                 "providers_to_initialize": ["ChangeNotifierProvider(create: (_) => SomeProvider())"]
             }},
             "dependencies": [
@@ -59,8 +68,11 @@ class TaskPlanner:
             ]
         }}
 
-        Ensure the plan is comprehensive and covers all aspects of the requested task.
-        IMPORTANT: Your response should be a valid JSON object and nothing else.
+        IMPORTANT:
+        1. Your response must be a valid JSON object
+        2. If this is a home/landing screen task, set initial_route accordingly
+        3. Ensure routes match created screen names
+        4. Follow the template structure for main.dart updates
         """
 
         for attempt in range(self.max_retries):
@@ -69,13 +81,10 @@ class TaskPlanner:
                 logger.debug(f"Raw response: {response}")
 
                 if isinstance(response, dict) and 'response' in response:
-                    # This is likely an Ollama response
                     task_plan = self.extract_json(response['response'])
                 elif isinstance(response, str):
-                    # This could be a Gemini response or a string from Ollama
                     task_plan = self.extract_json(response)
                 else:
-                    # Unexpected response type
                     raise ValueError(f"Unexpected response type: {type(response)}")
 
                 if task_plan and self.validate_task_plan(task_plan):
