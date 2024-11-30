@@ -1,16 +1,8 @@
-// flutter_bot/templates/default_main.dart
+// default_main.dart
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 void main() {
-  runApp(
-    MultiProvider(
-      providers: [
-        // Dynamic providers will be added here
-      ],
-      child: const MyApp(),
-    ),
-  );
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -19,12 +11,16 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter App',
+      title: 'Flutter App Template',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      initialRoute: '/',  // Will be updated based on user task
+      home: const Scaffold(  // Default home until routes are added
+        body: Center(
+          child: Text('Welcome to the Flutter Autonomous Builder Bot'),
+        ),
+      ),
       routes: {
         // Dynamic routes will be added here
       },

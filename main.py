@@ -19,7 +19,7 @@ from project_context_manager import ProjectContextManager
 from flutter_project_validator import FlutterProjectValidator
 from ai_client import AIClient
 from config import SKIP_DART_ANALYSIS, USE_GEMINI_API, USE_DART_VALIDATOR
-
+from task_context import TaskContext
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -178,7 +178,7 @@ def check_and_add_dependencies(project_root: str, generated_updates: Dict[str, s
 def development_loop(client: AIClient, project_root: str, flutter_process: subprocess.Popen, selected_device: str):
     task_planner = TaskPlanner(client)
     project_context_manager = ProjectContextManager(project_root)
-
+    task_context = TaskContext()
     logger.info(f"USE_DART_VALIDATOR setting: {USE_DART_VALIDATOR}")
     flutter_validator = FlutterProjectValidator(client) if USE_DART_VALIDATOR else None
     logger.info(f"Flutter validator initialized: {'Yes' if flutter_validator else 'No'}")
@@ -258,8 +258,7 @@ def development_loop(client: AIClient, project_root: str, flutter_process: subpr
                 subprocess.run(['flutter', 'pub', 'get'], cwd=project_root, check=True)
 
             # Ensure correct project structure
-#             ensure_correct_structure(client, project_context_manager.file_contents, project_root)
-
+            ensure_correct_structure(client, project_context_manager.file_contents, project_root, task_context)
             # Run or hot-reload the Flutter app
             if not flutter_process:
                 logger.info("Flutter process is not running. Starting the app...")

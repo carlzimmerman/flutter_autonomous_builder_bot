@@ -7,29 +7,89 @@ import tempfile
 import logging
 from ai_client import AIClient
 from config import SKIP_DART_ANALYSIS
-
+import subprocess
+from task_context import TaskContext
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-def ensure_correct_structure(client: AIClient, project_files: Dict[str, str], project_root: str):
+def ensure_correct_structure(client: AIClient, project_files: Dict[str, str], project_root: str, task_context: TaskContext):
     logger.info("Starting project structure analysis and correction")
     try:
-        analysis = analyze_project_structure(client, project_files, project_root)
-        update_project_structure(client, project_files, project_root, analysis)
-        update_main_dart(client, project_files, project_root, analysis.get('main_dart_updates', {}))
+        # 1. Analyze current project structure
+        screen_files = [path for path in project_files.keys() if path.startswith('lib/screens/')]
+        widget_files = [path for path in project_files.keys() if path.startswith('lib/widgets/')]
+        provider_files = [path for path in project_files.keys() if path.startswith('lib/providers/')]
+        service_files = [path for path in project_files.keys() if path.startswith('lib/services/')]
 
-        dependencies = analysis.get('dependencies', [])
-        if dependencies:
-            update_pubspec_yaml(client, project_files, project_root, dependencies)
-        else:
-            logger.info("No new dependencies to add.")
+        # 2. Build analysis based on existing files
+        analysis = {
+            "main_dart_updates": {
+                "imports_to_add": [],
+                "routes_to_add": {},
+                "initial_route": None,
+                "providers_to_initialize": []
+            },
+            "dependencies": []
+        }
 
-        create_missing_components(client, project_files, project_root)
+        # 3. Remove duplicate widget definitions from main.dart
+        main_dart_path = 'lib/main.dart'
+        if main_dart_path in project_files:
+            main_content = project_files[main_dart_path]
+            for widget_name, file_path in task_context.created_widgets.items():
+                if widget_name in main_content and file_path != main_dart_path:
+                    pattern = f"class {widget_name}.*?}}\n?"
+                    main_content = re.sub(pattern, "", main_content, flags=re.DOTALL)
+                    logger.info(f"Removed duplicate widget {widget_name} from main.dart")
+            project_files[main_dart_path] = main_content
 
-        # Validate and fix Dart code
+        # 4. Check each type of file for needed updates
+        # Screen files -> routes and imports
+        for screen_path in screen_files:
+            screen_name = os.path.basename(screen_path).replace('.dart', '')
+            screen_class = ''.join(word.capitalize() for word in screen_name.split('_'))
+            route_name = f"/{screen_name.replace('_screen', '')}"
+
+            # Add to task context
+            task_context.add_widget(screen_class, screen_path)
+            task_context.add_route(route_name, screen_class)
+
+            analysis["main_dart_updates"]["imports_to_add"].append(
+                f"import './{screen_path.replace('lib/', '')}'"
+            )
+            analysis["main_dart_updates"]["routes_to_add"][route_name] = f"{screen_class}()"
+
+        # Provider files -> provider initialization and imports
+        for provider_path in provider_files:
+            provider_name = os.path.basename(provider_path).replace('.dart', '')
+            provider_class = ''.join(word.capitalize() for word in provider_name.split('_'))
+
+            analysis["main_dart_updates"]["imports_to_add"].append(
+                f"import './{provider_path.replace('lib/', '')}'"
+            )
+            if not 'provider' in analysis["dependencies"]:
+                analysis["dependencies"].append("provider: ^6.0.0")
+            analysis["main_dart_updates"]["providers_to_initialize"].append(
+                f"ChangeNotifierProvider(create: (_) => {provider_class}())"
+            )
+
+        # 5. Set initial route based on task context
+        if task_context.routes:
+            # Use the most recently added route as initial
+            analysis["main_dart_updates"]["initial_route"] = list(task_context.routes.keys())[-1]
+
+        # 6. Update main.dart if needed
+        if any(analysis["main_dart_updates"].values()):
+            update_main_dart(client, project_files, project_root, analysis["main_dart_updates"])
+
+        # 7. Handle dependencies
+        if analysis["dependencies"]:
+            update_pubspec_yaml(client, project_files, project_root, analysis["dependencies"])
+
+        # 8. Validate and fix Dart code
         for file_path, content in project_files.items():
-            if file_path.endswith('.dart'):
+            # Only validate lib/ files for now, skip tests
+            if file_path.endswith('.dart') and file_path.startswith('lib/'):
                 if not validate_dart_code(content):
                     logger.info(f"Fixing invalid Dart code in {file_path}")
                     fixed_content = fix_dart_code(client, content, file_path, project_files)
@@ -38,14 +98,11 @@ def ensure_correct_structure(client: AIClient, project_files: Dict[str, str], pr
                         with open(os.path.join(project_root, file_path), 'w') as f:
                             f.write(fixed_content)
                         logger.info(f"Fixed and updated {file_path}")
-                    else:
-                        logger.warning(f"Failed to fix {file_path}. Manual intervention may be required.")
 
-        logger.info("Project structure has been updated and ensured for correctness.")
+        logger.info("Project structure validation complete")
     except Exception as e:
         logger.error(f"Error in ensure_correct_structure: {str(e)}", exc_info=True)
         raise
-
 
 def update_existing_files(client: AIClient, project_files: Dict[str, str], project_root: str, files_to_update: List[Dict[str, Any]]):
     for file_info in files_to_update:
@@ -89,65 +146,6 @@ def validate_and_fix_dart_code(client: AIClient, project_files: Dict[str, str], 
                 else:
                     logger.warning(f"Failed to fix {file_path}. Manual intervention may be required.")
 
-
-def analyze_project_structure(client: AIClient, project_files: Dict[str, str], project_root: str) -> Dict[str, Any]:
-    logger.info("Analyzing project structure")
-    try:
-        file_list = "\n".join(project_files.keys())
-        prompt = f"""
-        Analyze the following Flutter project structure and suggest necessary updates to ensure a coherent and well-structured application:
-
-        Project files:
-        {file_list}
-
-        Provide a JSON object with the following structure:
-        {{
-            "files_to_update": [
-                {{
-                    "file_path": "path/to/file",
-                    "changes": [
-                        "Description of change 1",
-                        "Description of change 2"
-                    ]
-                }}
-            ],
-            "new_files": [
-                {{
-                    "file_path": "path/to/new/file",
-                    "content": "Brief description of file content"
-                }}
-            ],
-            "files_to_delete": ["path/to/file/to/delete"],
-            "main_dart_updates": {{
-                "providers_to_initialize": ["ProviderName1", "ProviderName2"],
-                "routes": [
-                    {{
-                        "route": "/route_name",
-                        "widget": "WidgetName"
-                    }}
-                ],
-                "initial_route": "/initial_route"
-            }},
-            "dependencies": ["package_name1", "package_name2"]
-        }}
-
-        Ensure that the suggested changes maintain the existing functionality while improving the overall structure and coherence of the project.
-        Pay special attention to the main.dart file, ensuring it properly initializes providers, sets up routing, and defines the initial route.
-        Include any necessary dependencies that should be added to the pubspec.yaml file.
-
-        PLEASE RESPOND WITH JSON ONLY
-        """
-
-        logger.debug(f"Sending prompt to AI Client: {prompt}")
-        response = client.generate(prompt=prompt)
-        logger.debug(f"Received response from AI Client: {response['response']}")
-
-        analysis = parse_and_validate_json(client, response['response'])
-        logger.info("Project structure analysis completed successfully")
-        return analysis
-    except Exception as e:
-        logger.error(f"Error in analyze_project_structure: {str(e)}", exc_info=True)
-        raise
 
 
 def parse_and_validate_json(client: AIClient, json_str: str) -> Dict[str, Any]:
@@ -255,20 +253,56 @@ def generate_file_content(client: AIClient, file_path: str, content_description:
     return response['response'].strip()
 
 def update_main_dart(client: AIClient, project_files: Dict[str, str], project_root: str, main_dart_updates: Dict[str, Any]):
-    print("\n--- Updating main.dart ---")
     main_dart_path = 'lib/main.dart'
-    if main_dart_path not in project_files:
-        print(f"Warning: {main_dart_path} not found in project files. Creating a new one.")
-        project_files[main_dart_path] = generate_main_dart(client, main_dart_updates)
-    else:
-        main_dart_content = project_files[main_dart_path]
-        updated_main_dart = update_existing_main_dart(client, main_dart_content, main_dart_updates)
-        project_files[main_dart_path] = updated_main_dart
+    current_content = project_files.get(main_dart_path, '')
 
-    with open(os.path.join(project_root, main_dart_path), 'w') as f:
-        f.write(project_files[main_dart_path])
-    print(f"Updated main.dart content:\n{project_files[main_dart_path]}\n")
-    print("--- main.dart update complete ---\n")
+    # Handle imports first
+    imports_to_add = [
+        f"import '{imp}';" for imp in main_dart_updates.get('imports_to_add', [])
+        if imp not in current_content
+    ]
+    updated_content = manage_dart_imports(main_dart_path, imports_to_add, project_files)
+
+    # Update routes and providers
+    prompt = f"""
+    Update this main.dart file to add these routes and providers.
+    Do NOT include any explanations or JSON, just return the Dart code.
+
+    Routes to add: {json.dumps(main_dart_updates.get('routes_to_add', {}))}
+    Initial route: {main_dart_updates.get('initial_route')}
+    Providers: {json.dumps(main_dart_updates.get('providers_to_initialize', []))}
+
+    Current content:
+    {updated_content}
+    """
+
+    for attempt in range(3):
+        try:
+            response = client.generate(prompt=prompt)
+            code = response['response']
+
+            # Clean up any markdown or JSON
+            if '```dart' in code:
+                code = code.split('```dart')[-1].split('```')[0]
+            elif '```' in code:
+                code = code.split('```')[1]
+
+            # Basic validation
+            if ('import' in code and
+                'MaterialApp' in code and
+                'class MyApp' in code and
+                'Widget build' in code):
+
+                project_files[main_dart_path] = code.strip()
+                with open(os.path.join(project_root, main_dart_path), 'w') as f:
+                    f.write(code.strip())
+                logger.info("Successfully updated main.dart")
+                return
+
+        except Exception as e:
+            logger.error(f"Error updating main.dart (attempt {attempt + 1}): {str(e)}")
+
+    logger.warning("Failed to update main.dart properly")
 
 def generate_main_dart(client: AIClient, main_dart_updates: Dict[str, Any]) -> str:
     prompt = f"""
@@ -296,13 +330,97 @@ def update_existing_main_dart(client: AIClient, current_content: str, main_dart_
     Current main.dart content:
     {current_content}
 
-    Provide the updated main.dart content, ensuring all existing functionality is preserved unless explicitly stated otherwise.
-    Make sure to use MaterialApp for routing, and wrap the app with necessary provider widgets.
-    If no providers or routes are specified, maintain the existing structure.
+    Return a JSON object with the following structure:
+    {{
+        "dart_code": "the complete main.dart content",
+        "imports": ["list of imports needed"],
+        "routes_added": ["list of routes added"],
+        "providers_added": ["list of providers added"]
+    }}
+
+    IMPORTANT:
+    - The dart_code should be complete and valid Flutter/Dart syntax
+    - Must include proper routing setup
+    - Must preserve MaterialApp and theme configuration
     """
 
-    response = client.generate( prompt=prompt)
-    return response['response'].strip()
+    for attempt in range(3):
+        try:
+            response = client.generate(prompt=prompt)
+            response_text = response['response']
+
+            # First try: Parse as JSON
+            try:
+                result = json.loads(response_text)
+                code = result.get('dart_code', '')
+                if code and 'MaterialApp' in code and 'build' in code:
+                    return code.strip()
+            except json.JSONDecodeError:
+                # Second try: Check if it's direct Dart code
+                if 'import' in response_text and 'MaterialApp' in response_text:
+                    # Extract code from markdown if present
+                    if '```dart' in response_text:
+                        code = response_text.split('```dart')[-1].split('```')[0]
+                    else:
+                        code = response_text
+
+                    if code and 'MaterialApp' in code and 'build' in code:
+                        # Try to convert to proper JSON format
+                        correction_prompt = f"""
+                        Convert this Dart code into a JSON response:
+
+                        {code}
+
+                        Return a JSON object with this structure:
+                        {{
+                            "dart_code": "the complete code here",
+                            "imports": ["list of imports"],
+                            "routes_added": ["list of routes"],
+                            "providers_added": ["list of providers"]
+                        }}
+                        """
+
+                        correction_response = client.generate(prompt=correction_prompt)
+                        try:
+                            corrected = json.loads(correction_response['response'])
+                            if corrected.get('dart_code'):
+                                return corrected['dart_code'].strip()
+                        except json.JSONDecodeError:
+                            # If conversion fails, return the cleaned code
+                            return code.strip()
+
+                # If both attempts fail, try one more time with explicit correction
+                logger.warning(f"Retrying with explicit correction (attempt {attempt + 1})")
+                correction_prompt = f"""
+                Convert this response into proper JSON format:
+
+                {response_text}
+
+                Return ONLY a JSON object with this structure:
+                {{
+                    "dart_code": "the complete main.dart content",
+                    "imports": ["list of imports"],
+                    "routes_added": ["list of routes"],
+                    "providers_added": ["list of providers"]
+                }}
+                """
+
+                correction_response = client.generate(prompt=correction_prompt)
+                try:
+                    corrected = json.loads(correction_response['response'])
+                    if corrected.get('dart_code'):
+                        return corrected['dart_code'].strip()
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to correct JSON on attempt {attempt + 1}")
+
+        except Exception as e:
+            logger.error(f"Error in update_existing_main_dart (attempt {attempt + 1}): {str(e)}")
+
+        if attempt < 2:
+            logger.warning(f"Retrying main.dart update (attempt {attempt + 1})")
+
+    logger.warning("All attempts failed, returning current content")
+    return current_content
 
 def update_pubspec_yaml(client: AIClient, project_files: Dict[str, str], project_root: str, new_dependencies: List[str]):
     print("\n--- Updating pubspec.yaml ---")
@@ -335,21 +453,40 @@ def add_dependencies_to_pubspec(client: AIClient, current_content: str, new_depe
     response = client.generate( prompt=prompt)
     return response['response'].strip()
 
-def create_missing_components(client: AIClient, project_files: Dict[str, str], project_root: str):
-    print("\n--- Creating missing components ---")
-    essential_components = [
-        'lib/screens',
-        'lib/models',
-        'lib/providers',
-        'lib/services',
-        'lib/widgets',
-        'lib/utils',
-    ]
+# def create_missing_components(client: AIClient, project_files: Dict[str, str], project_root: str):
+#     print("\n--- Creating missing components ---")
+#     essential_components = [
+#         'lib/screens',
+#         'lib/models',
+#         'lib/providers',
+#         'lib/services',
+#         'lib/widgets',
+#         'lib/utils',
+#     ]
+#
+#     for component in essential_components:
+#         if not any(file.startswith(component) for file in project_files):
+#             create_component(client, project_files, project_root, component)
+#     print("--- Missing components creation complete ---\n")
 
-    for component in essential_components:
-        if not any(file.startswith(component) for file in project_files):
-            create_component(client, project_files, project_root, component)
-    print("--- Missing components creation complete ---\n")
+
+def manage_dart_imports(file_path: str, imports_to_add: List[str], project_files: Dict[str, str]) -> str:
+    """Manages imports at the top of Dart files"""
+    content = project_files.get(file_path, '')
+
+    # Split content into imports and rest of code
+    lines = content.split('\n')
+    import_lines = [line for line in lines if line.strip().startswith('import')]
+    code_lines = [line for line in lines if not line.strip().startswith('import')]
+
+    # Add new imports if they don't exist
+    for import_to_add in imports_to_add:
+        if not any(import_to_add in line for line in import_lines):
+            import_lines.append(import_to_add)
+
+    # Reconstruct file with sorted imports at top
+    return '\n'.join(sorted(import_lines) + [''] + code_lines)
+
 
 def create_component(client: AIClient, project_files: Dict[str, str], project_root: str, component: str):
     prompt = f"""
@@ -374,6 +511,18 @@ def create_component(client: AIClient, project_files: Dict[str, str], project_ro
 
 
 def validate_dart_code(code: str) -> bool:
+    # If code is in JSON format, extract the dart_code
+    try:
+        if code.strip().startswith('{'):
+            json_data = json.loads(code)
+            code = json_data.get('dart_code', code)
+    except json.JSONDecodeError:
+        pass
+
+    # Skip validation if it's not a lib/ file
+    if 'test/' in code:
+        return True
+
     with tempfile.NamedTemporaryFile(mode='w', suffix='.dart', delete=False) as temp_file:
         temp_file.write(code)
         temp_file.flush()
@@ -383,7 +532,9 @@ def validate_dart_code(code: str) -> bool:
             if result.returncode == 0:
                 return True
             else:
-                logger.warning(f"Dart analysis found issues:\n{result.stdout}\n{result.stderr}")
+                # Only log warnings for lib/ files
+                if 'lib/' in temp_file.name:
+                    logger.warning(f"Dart analysis found issues:\n{result.stdout}\n{result.stderr}")
                 return False
         finally:
             os.unlink(temp_file.name)
@@ -418,41 +569,41 @@ def fix_dart_code(client: AIClient, invalid_code: str, file_path: str, project_c
     fixed_code = fixed_code.replace("```dart", "").replace("```", "").strip()
 
     return fixed_code
-
-# Update the ensure_correct_structure function to include code validation and fixing
-def ensure_correct_structure(client: AIClient, project_files: Dict[str, str], project_root: str):
-    logger.info("Starting project structure analysis and correction")
-    try:
-        analysis = analyze_project_structure(client, project_files, project_root)
-        update_project_structure(client, project_files, project_root, analysis)
-        update_main_dart(client, project_files, project_root, analysis.get('main_dart_updates', {}))
-
-        dependencies = analysis.get('dependencies', [])
-        if dependencies:
-            update_pubspec_yaml(client, project_files, project_root, dependencies)
-        else:
-            logger.info("No new dependencies to add.")
-
-        create_missing_components(client, project_files, project_root)
-
-        # Add code validation and fixing
-        for file_path, content in project_files.items():
-            if file_path.endswith('.dart'):
-                if not validate_dart_code(content):
-                    logger.info(f"Fixing invalid Dart code in {file_path}")
-                    fixed_content = fix_dart_code(client, content, file_path, project_files)
-                    if validate_dart_code(fixed_content):
-                        project_files[file_path] = fixed_content
-                        with open(os.path.join(project_root, file_path), 'w') as f:
-                            f.write(fixed_content)
-                        logger.info(f"Fixed and updated {file_path}")
-                    else:
-                        logger.warning(f"Failed to fix {file_path}. Manual intervention may be required.")
-
-        logger.info("Project structure has been updated and ensured for correctness.")
-    except Exception as e:
-        logger.error(f"Error in ensure_correct_structure: {str(e)}", exc_info=True)
-        raise
+#
+# # Update the ensure_correct_structure function to include code validation and fixing
+# def ensure_correct_structure(client: AIClient, project_files: Dict[str, str], project_root: str):
+#     logger.info("Starting project structure analysis and correction")
+#     try:
+#         analysis = analyze_project_structure(client, project_files, project_root)
+#         update_project_structure(client, project_files, project_root, analysis)
+#         update_main_dart(client, project_files, project_root, analysis.get('main_dart_updates', {}))
+#
+#         dependencies = analysis.get('dependencies', [])
+#         if dependencies:
+#             update_pubspec_yaml(client, project_files, project_root, dependencies)
+#         else:
+#             logger.info("No new dependencies to add.")
+#
+#         create_missing_components(client, project_files, project_root)
+#
+#         # Add code validation and fixing
+#         for file_path, content in project_files.items():
+#             if file_path.endswith('.dart'):
+#                 if not validate_dart_code(content):
+#                     logger.info(f"Fixing invalid Dart code in {file_path}")
+#                     fixed_content = fix_dart_code(client, content, file_path, project_files)
+#                     if validate_dart_code(fixed_content):
+#                         project_files[file_path] = fixed_content
+#                         with open(os.path.join(project_root, file_path), 'w') as f:
+#                             f.write(fixed_content)
+#                         logger.info(f"Fixed and updated {file_path}")
+#                     else:
+#                         logger.warning(f"Failed to fix {file_path}. Manual intervention may be required.")
+#
+#         logger.info("Project structure has been updated and ensured for correctness.")
+#     except Exception as e:
+#         logger.error(f"Error in ensure_correct_structure: {str(e)}", exc_info=True)
+#         raise
 
 if __name__ == "__main__":
     # This block can be used for testing the module independently

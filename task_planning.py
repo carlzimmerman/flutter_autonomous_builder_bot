@@ -23,6 +23,7 @@ class TaskPlanner:
         Current project files:
         {json.dumps(list(current_project_files.keys()), indent=2)}
 
+
         The main.dart file uses a template with:
         - MultiProvider wrapper for state management
         - MaterialApp with initialRoute and named routes
@@ -51,7 +52,7 @@ class TaskPlanner:
                 {{
                     "type": "create_file" | "update_file" | "delete_file",
                     "file_path": "path/to/file",
-                    "description": "Description of changes"
+                    "description": "Description of changes to the file. this should be interpreted from the prompt"
                 }}
             ],
             "update_main_dart": {{
@@ -75,6 +76,7 @@ class TaskPlanner:
         4. Follow the template structure for main.dart updates
         """
 
+    # Rest of your function remains the same...
         for attempt in range(self.max_retries):
             try:
                 response = self.client.generate(prompt=prompt)
