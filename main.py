@@ -20,6 +20,7 @@ from flutter_project_validator import FlutterProjectValidator
 from ai_client import AIClient
 from config import SKIP_DART_ANALYSIS, USE_GEMINI_API, USE_DART_VALIDATOR
 from task_context import TaskContext
+from utils import strip_const_declarations
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -182,6 +183,14 @@ def development_loop(client: AIClient, project_root: str, flutter_process: subpr
     logger.info(f"USE_DART_VALIDATOR setting: {USE_DART_VALIDATOR}")
     flutter_validator = FlutterProjectValidator(client) if USE_DART_VALIDATOR else None
     logger.info(f"Flutter validator initialized: {'Yes' if flutter_validator else 'No'}")
+
+
+    print("Cleaning const declarations from Dart files...")
+    for file_path, content in project_context_manager.file_contents.items():
+        if file_path.endswith('.dart'):
+            cleaned_content = strip_const_declarations(content)
+            project_context_manager.update_file(file_path, cleaned_content)
+            print(f"Cleaned const declarations from {file_path}")
 
     while True:
         user_input = input("\nEnter your Flutter development task (or 'exit' to quit): ")

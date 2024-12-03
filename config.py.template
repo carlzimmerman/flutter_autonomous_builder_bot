@@ -19,7 +19,8 @@ USE_DART_VALIDATOR = False
 # OLLAMA_MODEL = "yi-coder"
 # OLLAMA_MODEL = "llama3.2"
 # OLLAMA_MODEL = "qwen2.5-coder:32b"
-OLLAMA_MODEL = "opencoder:8b"
+# OLLAMA_MODEL = "opencoder:8b"
+OLLAMA_MODEL = "qwq:latest"
 
 
 

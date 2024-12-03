@@ -1,5 +1,6 @@
 import subprocess
 from typing import Tuple, Union
+import re
 
 def run_command(command: str, capture_output: bool = True) -> Union[Tuple[str, str], subprocess.Popen]:
     """
@@ -25,3 +26,23 @@ def truncate_context(context: str, max_length: int) -> str:
     truncated = context[:max_length // 2] + "\n...\n" + context[-max_length // 2:]
     print(f"Context truncated from {len(context)} to {len(truncated)} characters.")
     return truncated
+
+
+
+def strip_const_declarations(code: str) -> str:
+    """
+    Remove const declarations from Dart code while preserving the rest of the code structure.
+    """
+    # Remove const from const constructor calls - matches "const ClassName(" or "const _ClassName("
+    code = re.sub(r'const\s+([A-Z_][A-Za-z0-9_]*)\(', r'\1(', code)
+
+    # Remove const from const variable declarations - matches "const value =" or "const List<type>"
+    code = re.sub(r'const\s+([A-Za-z0-9_<>]+\s+[A-Za-z0-9_]+\s*=)', r'\1', code)
+
+    # Remove const from const collection literals - matches "const [" or "const {"
+    code = re.sub(r'const\s+(\[|\{)', r'\1', code)
+
+    # Remove const from named constructor calls - matches "const ClassName.named("
+    code = re.sub(r'const\s+([A-Z_][A-Za-z0-9_]*\.[A-Za-z0-9_]+\()', r'\1', code)
+
+    return code

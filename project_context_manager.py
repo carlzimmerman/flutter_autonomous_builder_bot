@@ -1,5 +1,6 @@
 import os
 from typing import Dict, List
+from utils import strip_const_declarations
 
 class ProjectContextManager:
     def __init__(self, project_root: str):
@@ -31,6 +32,7 @@ class ProjectContextManager:
     def update_file(self, file_path: str, content: str):
         full_path = os.path.join(self.project_root, file_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        clean_content = strip_const_declarations(content)
         with open(full_path, 'w') as f:
             f.write(content)
         self.update_context()

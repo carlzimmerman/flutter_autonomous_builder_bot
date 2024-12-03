@@ -5,6 +5,8 @@ import subprocess
 from typing import Dict, List, Optional, Tuple, Any
 from project_context_manager import ProjectContextManager
 from ai_client import AIClient
+import re
+from utils import strip_const_declarations
 
 MAX_RETRIES = 3
 RETRY_DELAY = 5
@@ -169,7 +171,7 @@ def intelligent_code_merge(client: 'AIClient', current_content: str, new_code: s
     """
 
     response = client.generate( prompt=merge_prompt)
-    return response['response'].strip()
+    return strip_const_declarations(response['response'].strip())
 
 def apply_code_change(client: 'AIClient', current_content: str, code_change: str) -> str:
     prompt = f"""
@@ -249,6 +251,7 @@ def update_file(client: AIClient, file_path: str, content_prompt: str, project_f
     full_path = os.path.join(project_root, file_path)
     existing_content = project_files.get(file_path, "")
     updated_content = generate_content(client, content_prompt, existing_content)
+    updated_content = strip_const_declarations(updated_content)
     with open(full_path, 'w') as f:
         f.write(updated_content)
     print(f"Updated file: {file_path}")
@@ -276,7 +279,7 @@ def generate_content(client: AIClient, prompt: str, existing_content: str = "") 
     Provide the complete, updated Dart code for the file, ensuring all existing functionality is preserved unless explicitly stated otherwise.
     """
     response = client.generate( prompt=full_prompt)
-    return response['response'].strip()
+    return strip_const_declarations(response['response'].strip())
 
 def analyze_project_structure(client: AIClient, task: Dict[str, Any], project_files: Dict[str, str]) -> List[str]:
     file_list = "\n".join(project_files.keys())
@@ -399,6 +402,9 @@ def clean_dart_code(code: str) -> str:
 
     # Trim leading and trailing whitespace
     code = code.strip()
+
+
+    code = strip_const_declarations(code)
 
     # Validate Dart code (you may want to add more sophisticated validation)
     if not code.startswith("import") and not code.startswith("//") and not code.startswith("class"):
@@ -638,3 +644,4 @@ def validate_file_structure(client: AIClient, file_path: str, file_content: str)
     except Exception as e:
         print(f"Error validating file structure for {file_path}: {e}")
         return file_content
+
