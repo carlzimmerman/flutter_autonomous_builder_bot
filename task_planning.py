@@ -15,31 +15,6 @@ class TaskPlanner:
 
 
     def generate_task_plan(self, user_input: str, current_project_files: Dict[str, str]) -> Dict[str, Any]:
-        # First analyze what the task needs
-        task_needs = self.analyze_task_needs(user_input)
-
-        # Define the project architecture template
-        project_architecture = self.get_project_architecture(task_needs)
-
-        # Adjust the prompt based on needs
-        prompt_additions = []
-        if task_needs["needs_state_management"]:
-            prompt_additions.append("""
-            Include Provider setup:
-            - Proper provider initialization in main.dart
-            - State management classes in lib/providers/
-            - Provider consumer usage in widgets
-            """)
-
-        if task_needs["needs_api_calls"]:
-            prompt_additions.append("""
-            Include API handling:
-            - Service classes in lib/services/
-            - API client setup
-            - Error handling
-            """)
-
-        # Original prompt construction with conditional additions
         prompt = f"""
         Generate a task plan for the following Flutter development task:
 
@@ -48,26 +23,51 @@ class TaskPlanner:
         Current project files:
         {json.dumps(list(current_project_files.keys()), indent=2)}
 
+
         The main.dart file uses a template with:
-        - {"MultiProvider wrapper for state management" if task_needs["needs_state_management"] else "Simple MaterialApp setup"}
+        - MultiProvider wrapper for state management
         - MaterialApp with initialRoute and named routes
         - Standard Material theme configuration
 
-        {project_architecture}
-
-        {"".join(prompt_additions)}
+        Project architecture:
+        1. lib/main.dart: Main entry point (using our template structure)
+        2. lib/screens/: Contains screen widgets
+        3. lib/widgets/: Reusable custom widgets
+        4. lib/models/: Data models
+        5. lib/providers/: State management providers
+        6. lib/services/: Business logic and API calls
 
         Return a JSON plan that includes:
         1. Steps to create/update/delete files
-        2. Main.dart updates:
+        2. Main.dart updates (must follow template structure):
            - New imports
            - Route updates
-           - {" Provider initialization" if task_needs["needs_state_management"] else ""}
-           - Initial route changes
+           - Provider initialization
+           - Initial route changes (if this is a home/landing screen)
         3. Required dependencies
 
         JSON structure:
-        {self.get_json_structure(task_needs)}
+        {{
+            "steps": [
+                {{
+                    "type": "create_file" | "update_file" | "delete_file",
+                    "file_path": "path/to/file",
+                    "description": "Description of changes to the file. this should be interpreted from the prompt"
+                }}
+            ],
+            "update_main_dart": {{
+                "imports_to_add": ["package:flutter/material.dart"],
+                "routes_to_add": {{"/route_name": "WidgetName()"}},
+                "initial_route": "/route_name",  # If this is meant to be the home screen
+                "providers_to_initialize": ["ChangeNotifierProvider(create: (_) => SomeProvider())"]
+            }},
+            "dependencies": [
+                {{
+                    "package_name": "package_name",
+                    "version": "^version_number"
+                }}
+            ]
+        }}
 
         IMPORTANT:
         1. Your response must be a valid JSON object
@@ -76,6 +76,7 @@ class TaskPlanner:
         4. Follow the template structure for main.dart updates
         """
 
+    # Rest of your function remains the same...
         for attempt in range(self.max_retries):
             try:
                 response = self.client.generate(prompt=prompt)
@@ -97,131 +98,24 @@ class TaskPlanner:
             except Exception as e:
                 logger.error(f"Error in generate_task_plan (attempt {attempt + 1}): {str(e)}")
 
-        # If all attempts fail, raise an error
         raise ValueError("Failed to generate a valid task plan after maximum retries.")
 
-    def _simplify_plan(self, task_plan: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Simplify the task plan to ensure minimal necessary changes.
-        """
-        simplified = {
-            "steps": [],
-            "update_main_dart": {
-                "imports_to_add": [],
-                "routes_to_add": {},
-                "initial_route": None,
-                "providers_to_initialize": []
-            },
-            "dependencies": []
-        }
-
-        # Keep only essential steps
-        for step in task_plan["steps"]:
-            if self._is_step_necessary(step):
-                simplified["steps"].append(step)
-
-        # Only include main.dart updates if absolutely needed
-        main_updates = task_plan.get("update_main_dart", {})
-        if main_updates.get("imports_to_add"):
-            simplified["update_main_dart"]["imports_to_add"] = main_updates["imports_to_add"]
-        if main_updates.get("initial_route"):
-            simplified["update_main_dart"]["initial_route"] = main_updates["initial_route"]
-            # Only add routes if we have an initial route
-            if main_updates.get("routes_to_add"):
-                simplified["update_main_dart"]["routes_to_add"] = main_updates["routes_to_add"]
-
-        # Only include dependencies if they're absolutely required
-        if task_plan.get("dependencies"):
-            simplified["dependencies"] = [
-                dep for dep in task_plan["dependencies"]
-                if self._is_dependency_necessary(dep)
-            ]
-
-        return simplified
-
-    def _is_step_necessary(self, step: Dict[str, Any]) -> bool:
-        """
-        Determine if a step is necessary for the requested functionality.
-        """
-        # Always keep direct screen/widget creation
-        if step["type"] == "create_file" and "screens/" in step["file_path"]:
-            return True
-        # Keep main.dart updates
-        if step["file_path"] == "lib/main.dart":
-            return True
-        # Skip test files
-        if "test/" in step["file_path"]:
-            return False
-        # Keep providers and services
-        if "providers/" in step["file_path"] or "services/" in step["file_path"]:
-            return True
-        # Keep models
-        if "models/" in step["file_path"]:
-            return True
-        # Skip unnecessary abstractions
-        if "utils/" in step["file_path"] or "helpers/" in step["file_path"]:
-            return False
-        return True
-
-    def _is_dependency_necessary(self, dependency: Dict[str, str]) -> bool:
-        """
-        Determine if a dependency is necessary for core functionality.
-        """
-        essential_packages = {"provider", "shared_preferences", "http"}
-        return dependency.get("package_name", "") in essential_packages
-
-
     def extract_json(self, text: str) -> Dict[str, Any]:
-        # First try direct JSON parsing
+        # Try to find JSON-like structure in the text
         try:
+            # First, try to parse the entire text as JSON
             return json.loads(text)
         except json.JSONDecodeError:
-            # If that fails, try to find and parse JSON
+            # If that fails, try to find a JSON object within the text
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 try:
                     return json.loads(match.group(0))
                 except json.JSONDecodeError:
-                    # If JSON extraction fails, try to get structured response
-                    logger.info("Attempting to get structured response from LLM")
-                    return self._get_structured_response(text)
+                    logger.error("Found JSON-like structure, but failed to parse it.")
             else:
-                logger.error("No JSON structure found. Attempting to get structured response.")
-                return self._get_structured_response(text)
+                logger.error("No valid JSON structure found in the response.")
         return {}
-
-    def _get_structured_response(self, failed_response: str) -> Dict[str, Any]:
-        """Attempt to get structured response after JSON parse failure."""
-        retry_prompt = f"""
-        The previous response was not valid JSON. Please convert this response into a valid JSON object:
-        {failed_response}
-
-        Return ONLY a valid JSON object in this exact structure:
-        {{
-            "steps": [
-                {{
-                    "type": "create_file",
-                    "file_path": "lib/screens/example_screen.dart",
-                    "description": "brief description"
-                }}
-            ],
-            "update_main_dart": {{
-                "imports_to_add": [],
-                "routes_to_add": {{}},
-                "initial_route": null,
-                "providers_to_initialize": []
-            }},
-            "dependencies": []
-        }}
-        """
-
-        try:
-            response = self.client.generate(prompt=retry_prompt)
-            return json.loads(response['response'])
-        except Exception as e:
-            logger.error(f"Failed to get structured response: {e}")
-            return {}
-
 
     def validate_task_plan(self, task_plan: Dict[str, Any]) -> bool:
         required_keys = ['steps', 'update_main_dart', 'dependencies']
@@ -236,66 +130,41 @@ class TaskPlanner:
         return True
 
 
+
     def generate_file_content(self, file_path: str, description: str, project_files: Dict[str, str]) -> str:
         existing_content = project_files.get(file_path, "")
         prompt = f"""
-        Generate Flutter code for: {file_path}
-        EXACT REQUIREMENTS: {description}
+        Generate valid Dart code for a Flutter app for the file {file_path}.
+        Description: {description}
 
-        RULES:
-        1. Follow requirements EXACTLY as specified
-        2. Include ONLY necessary imports
-        3. Do NOT use const anywhere
-        4. Keep code minimal but complete
-        5. No comments unless absolutely necessary
-        6. Match file name to class name
-        7. For screens: include Scaffold and proper routing
-        8. For providers: implement ChangeNotifier
-        9. For services: implement business logic methods
-        10. For models: include fromJson/toJson if needed
-
-        Location-specific rules:
-        - If in lib/screens/: Must be StatelessWidget/StatefulWidget with Scaffold
-        - If in lib/providers/: Must extend ChangeNotifier
-        - If in lib/services/: Must contain business logic methods
-        - If in lib/models/: Must have proper data structure
-        - If in lib/widgets/: Must be reusable components
-
-        Current content (if updating):
+        Existing content:
         ```dart
         {existing_content}
         ```
 
-        Project files: {list(project_files.keys())}
+        Ensure to:
+        1. Include necessary imports (e.g., 'package:flutter/material.dart')
+        2. Extend appropriate classes (e.g., StatelessWidget)
+        3. Implement required methods (e.g., build)
+        4. Use proper Flutter widgets and syntax
 
-        Return ONLY the Dart code.
+        Provide only the Dart code for the file, without any markdown code block syntax.
         """
 
-        try:
-            response = self.client.generate(prompt=prompt)
-            code = self.remove_code_markers(response['response'].strip())
-            return strip_const_declarations(code)
-        except Exception as e:
-            logger.error(f"Error generating content for {file_path}: {str(e)}")
-            return existing_content
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.generate(prompt=prompt)
+                if isinstance(response, dict) and 'response' in response:
+                    return self.remove_code_markers(response['response'])
+                elif isinstance(response, str):
+                    return self.remove_code_markers(response)
+                else:
+                    logger.error(f"Unexpected response format: {response}")
+            except Exception as e:
+                logger.error(f"Error generating content for {file_path} (attempt {attempt + 1}): {str(e)}")
 
-    def _clean_generated_code(self, code: str) -> str:
-        """
-        Clean and minimize generated code.
-        """
-        # Remove markdown
-        code = re.sub(r'```dart\s*', '', code)
-        code = re.sub(r'\s*```', '', code)
-
-        # Clean up extra whitespace
-        code = re.sub(r'\n{3,}', '\n\n', code)
-
-        # Organize imports
-        lines = code.split('\n')
-        imports = sorted([l for l in lines if l.strip().startswith('import')])
-        other_lines = [l for l in lines if not l.strip().startswith('import')]
-
-        return '\n'.join(imports + [''] + other_lines).strip()
+        logger.error(f"Failed to generate content for {file_path} after {self.max_retries} attempts.")
+        return existing_content
 
     def update_main_dart(self, main_dart_content: str, updates: Dict[str, Any]) -> str:
         prompt = f"""
@@ -844,6 +713,68 @@ class TaskPlanner:
                     logger.info(f"   - {change}")
             logger.info("")
 
+    def generate_specific_code(self, task: Dict[str, Any], project_files: Dict[str, str], project_root: str) -> Tuple[List[str], Dict[str, str]]:
+        logger.info(f"Generating code for task: {task['main_task']}")
+        new_directories = []
+        generated_updates = {}
+
+        for file_path in task['files']:
+            full_path = os.path.join(project_root, file_path)
+            directory = os.path.dirname(full_path)
+
+            if directory not in new_directories and not os.path.exists(directory):
+                os.makedirs(directory)
+                new_directories.append(directory)
+
+            existing_content = project_files.get(file_path, "")
+
+            prompt = f"""
+            Task: {task['main_task']}
+            Subtasks: {json.dumps(task['subtasks'])}
+            File: {file_path}
+
+            Existing content:
+            ```dart
+            {existing_content}
+            ```
+
+            Changes to make:
+            {task['changes']}
+
+            Please provide the complete, updated content for this file. If it's a new file, provide the full content. If it's an existing file, incorporate the necessary changes while preserving existing functionality.
+
+            Respond with only the file content, nothing else.
+            """
+
+            response = self.client.generate(prompt=prompt)
+            updated_content = response['response'].strip()
+
+            if updated_content:
+                generated_updates[file_path] = updated_content
+                logger.info(f"Generated content for file: {file_path}")
+            else:
+                logger.warning(f"No content generated for file: {file_path}")
+
+        return new_directories, generated_updates
+
+    def apply_code_change(self, current_content: str, code_change: str) -> str:
+        prompt = f"""
+        Current file content:
+        ```dart
+        {current_content}
+        ```
+
+        Proposed code change:
+        {code_change}
+
+        Please integrate the proposed code change into the current file content.
+        Ensure that the changes are applied correctly and the resulting code is valid Dart/Flutter code.
+        Return the entire updated file content.
+        """
+
+        response = self.client.generate(prompt=prompt)
+        return response['response'].strip()
+
 
     def validate_and_connect_project(self, project_root: str, project_files: Dict[str, str], tasks: List[Dict[str, Any]]):
         try:
@@ -852,137 +783,3 @@ class TaskPlanner:
             logger.error(f"Error in validate_and_connect_project: {str(e)}")
             print(f"An error occurred while validating and connecting project files: {str(e)}")
             print("The development process will continue, but the project structure may not be optimal.")
-
-    def generate_simplified_task_plan(self, user_input: str, current_project_files: Dict[str, str]) -> Dict[str, Any]:
-        """Generate a simplified task plan when the normal plan generation fails."""
-        simplified_prompt = f"""
-        Generate a minimal task plan for the following Flutter task:
-        {user_input}
-
-        Return a JSON object with this structure:
-        {{
-            "steps": [
-                {{
-                    "type": "create_file",
-                    "file_path": "lib/screens/new_screen.dart",
-                    "description": "Simple description"
-                }}
-            ],
-            "update_main_dart": {{
-                "imports_to_add": [],
-                "routes_to_add": {{}},
-                "initial_route": null,
-                "providers_to_initialize": []
-            }},
-            "dependencies": []
-        }}
-
-        Keep it as simple as possible while fulfilling the basic requirements.
-        """
-
-        try:
-            response = self.client.generate(prompt=simplified_prompt)
-            task_plan = self.extract_json(response['response'])
-            if self.validate_task_plan(task_plan):
-                return task_plan
-        except Exception as e:
-            logger.error(f"Error generating simplified task plan: {e}")
-            return {
-                "steps": [
-                    {
-                        "type": "create_file",
-                        "file_path": "lib/screens/new_screen.dart",
-                        "description": "Basic implementation of the requested feature"
-                    }
-                ],
-                "update_main_dart": {
-                    "imports_to_add": [],
-                    "routes_to_add": {},
-                    "initial_route": None,
-                    "providers_to_initialize": []
-                },
-                "dependencies": []
-            }
-
-
-
-    def analyze_task_needs(self, task_description: str) -> Dict[str, bool]:
-        """
-        Analyze task description to determine what features are needed.
-        """
-        prompt = f"""
-        Analyze this Flutter task and determine which features are needed.
-        Task: {task_description}
-
-        Return a JSON object with these flags (true/false):
-        {{
-            "needs_state_management": boolean,
-            "needs_routing": boolean,
-            "needs_api_calls": boolean,
-            "needs_local_storage": boolean,
-            "is_complex_ui": boolean
-        }}
-
-        Consider:
-        - State management needed if task involves data that changes
-        - Routing needed if multiple screens are involved
-        - API calls needed if external data is involved
-        - Local storage needed if data persistence is mentioned
-        - Complex UI if advanced layouts or animations mentioned
-        """
-
-        try:
-            response = self.client.generate(prompt=prompt)
-            return json.loads(response['response'])
-        except Exception as e:
-            logger.error(f"Error analyzing task needs: {e}")
-            return {
-                "needs_state_management": False,
-                "needs_routing": True,  # Always need basic routing
-                "needs_api_calls": False,
-                "needs_local_storage": False,
-                "is_complex_ui": False
-            }
-
-
-    def get_project_architecture(self, task_needs: Dict[str, bool]) -> str:
-        """
-        Return appropriate project architecture based on task needs.
-        """
-        architecture = [
-            "1. lib/main.dart: Main entry point",
-            "2. lib/screens/: Contains screen widgets",
-            "3. lib/widgets/: Reusable custom widgets"
-        ]
-
-        if task_needs["needs_state_management"]:
-            architecture.append("4. lib/providers/: State management")
-        if task_needs["needs_api_calls"]:
-            architecture.append("5. lib/services/: Business logic and API calls")
-        if task_needs["needs_local_storage"]:
-            architecture.append("6. lib/models/: Data models")
-
-        return "\n".join(architecture)
-
-    def get_json_structure(self, task_needs: Dict[str, bool]) -> str:
-        """
-        Return appropriate JSON structure based on task needs.
-        """
-        structure = {
-            "steps": [{
-                "type": "create_file | update_file | delete_file",
-                "file_path": "path/to/file",
-                "description": "Description of changes"
-            }],
-            "update_main_dart": {
-                "imports_to_add": ["relevant_imports"],
-                "routes_to_add": {},
-                "initial_route": "route_name"
-            },
-            "dependencies": []
-        }
-
-        if task_needs["needs_state_management"]:
-            structure["update_main_dart"]["providers_to_initialize"] = []
-
-        return json.dumps(structure, indent=2)
