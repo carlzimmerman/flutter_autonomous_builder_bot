@@ -132,6 +132,10 @@ class TaskPlanner:
 
 
     def generate_file_content(self, file_path: str, description: str, project_files: Dict[str, str]) -> str:
+        print(f"\n=== Generating Content for {file_path} ===")
+        print("Description:", description)
+        print("Existing content:")
+        print(project_files.get(file_path, "None"))
         existing_content = project_files.get(file_path, "")
         prompt = f"""
         Generate valid Dart code for a Flutter app for the file {file_path}.
@@ -164,36 +168,117 @@ class TaskPlanner:
                 logger.error(f"Error generating content for {file_path} (attempt {attempt + 1}): {str(e)}")
 
         logger.error(f"Failed to generate content for {file_path} after {self.max_retries} attempts.")
+        print(f"\nGenerated content for {file_path}:")
+        print(existing_content)
+        print("=== End File Generation ===\n")
+
         return existing_content
 
     def update_main_dart(self, main_dart_content: str, updates: Dict[str, Any]) -> str:
-        prompt = f"""
-        Update the following main.dart file with these changes:
-        {json.dumps(updates, indent=2)}
+        print("\n=== main.dart Update Process ===")
 
-        Current main.dart content:
+        # Extract route info for dynamic validation
+        route_widgets = {route: widget.replace('()', '')
+                        for route, widget in updates.get('routes_to_add', {}).items()}
+
+        prompt = f"""
+        Update main.dart with routing and imports.
+        Current content:
         ```dart
         {main_dart_content}
         ```
 
-        Provide the updated main.dart content, ensuring all existing functionality is preserved unless explicitly stated otherwise.
-        Do not include any markdown code block syntax in the response.
+        Required updates:
+        {json.dumps(updates, indent=2)}
+
+        STRICT REQUIREMENTS:
+        1. Keep existing main.dart structure but:
+           - Add necessary imports from /screens or /widgets for each route
+           - Update routes map with new routes
+           - Update initialRoute if specified
+
+        2. NEVER include ANY widget implementations except MyApp class
+
+        3. For each new route:
+           - Add import statement for the widget
+           - Only reference widget in routes (no implementation)
+           - Example: '/profile': (context) => ProfileScreen()
+
+        4. Structure should ALWAYS be:
+           - Imports at top
+           - main() function
+           - MyApp class
+           - NO other class implementations
+
+        DELETE any widget implementations found in main.dart (except MyApp).
+        If a widget is used in routes, it MUST be imported, not implemented here.
+
+        Return ONLY the updated main.dart content.
         """
 
         for attempt in range(self.max_retries):
             try:
+                print(f"\nAttempt {attempt + 1} to update main.dart")
                 response = self.client.generate(prompt=prompt)
-                if isinstance(response, dict) and 'response' in response:
-                    return self.remove_code_markers(response['response'])
-                elif isinstance(response, str):
-                    return self.remove_code_markers(response)
-                else:
-                    logger.error(f"Unexpected response format: {response}")
-            except Exception as e:
-                logger.error(f"Error updating main.dart (attempt {attempt + 1}): {str(e)}")
+                updated_content = self.remove_code_markers(response['response'])
 
-        logger.error(f"Failed to update main.dart after {self.max_retries} attempts. Returning original content.")
+                # Verify content has proper structure
+                if self._verify_dynamic_main_dart(updated_content, route_widgets):
+                    print("\nSuccessfully updated main.dart with proper structure")
+                    return updated_content
+                else:
+                    print(f"Invalid main.dart structure (attempt {attempt + 1})")
+
+            except Exception as e:
+                print(f"Error in main.dart update (attempt {attempt + 1}): {str(e)}")
+
+        print("Failed to generate valid main.dart, returning original")
         return main_dart_content
+
+    def _verify_dynamic_main_dart(self, content: str, route_widgets: Dict[str, str]) -> bool:
+        """
+        Dynamically verify main.dart structure based on required routes/widgets.
+        """
+        # Should only have MyApp class
+        class_definitions = re.findall(r'class\s+(\w+)', content)
+        if len(class_definitions) > 1 or class_definitions[0] != 'MyApp':
+            print(f"Found invalid classes: {class_definitions}")
+            return False
+
+        # Check for necessary imports for each widget
+        for widget_name in route_widgets.values():
+            import_patterns = [
+                f"import '.*/{widget_name.lower()}.dart'",
+                f"import '.*screens/{widget_name.lower()}.dart'",
+                f"import '.*widgets/{widget_name.lower()}.dart'"
+            ]
+            if not any(re.search(pattern, content) for pattern in import_patterns):
+                print(f"Missing import for {widget_name}")
+                return False
+
+        # Verify route structure
+        routes_section = re.search(r'routes:\s*{([^}]*)}', content)
+        if not routes_section:
+            print("Missing routes section")
+            return False
+
+        # Check each route has proper format
+        for route, widget in route_widgets.items():
+            route_pattern = f"'{route}':\s*\(context\)\s*=>\s*{widget}\(\)"
+            if not re.search(route_pattern, content):
+                print(f"Invalid route format for {route}")
+                return False
+
+        return True
+
+    def _validate_main_content(self, content: str) -> bool:
+        """Check if main.dart content follows our rules"""
+        # Count class definitions - should only find MyApp
+        class_matches = re.findall(r'class\s+(\w+)', content)
+        if len(class_matches) > 1 or (len(class_matches) == 1 and class_matches[0] != 'MyApp'):
+            return False
+
+        return True
 
     def remove_code_markers(self, content: str) -> str:
         # Remove any potential markdown code block markers
@@ -479,7 +564,7 @@ class TaskPlanner:
             "files_to_create_or_update": [
                 {{
                     "path": "lib/main.dart",
-                    "description": "Detailed description of the changes to be made to this file"
+                    "description": "Detailed description of the changes to be made to this file with as much detail as possible based on the input prompt"
                 }}
             ],
             "update_main_dart": {{
@@ -570,6 +655,7 @@ class TaskPlanner:
                     logger.error("Max retries reached. Returning original main.dart content.")
                     return main_dart_content
 
+        print("=== End main.dart Update ===\n")
         return main_dart_content
 
     def update_project_structure(self, project_root: str, generated_updates: Dict[str, str]):

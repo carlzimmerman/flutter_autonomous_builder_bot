@@ -13,6 +13,9 @@ from task_context import TaskContext
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 def ensure_correct_structure(client: AIClient, project_files: Dict[str, str], project_root: str, task_context: TaskContext):
+    print("\n=== Project Structure Validation ===")
+    print("Current files:", list(project_files.keys()))
+
     logger.info("Starting project structure analysis and correction")
     try:
         # 1. Analyze current project structure

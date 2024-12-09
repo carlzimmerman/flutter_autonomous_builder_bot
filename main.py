@@ -22,6 +22,9 @@ from config import SKIP_DART_ANALYSIS, USE_GEMINI_API, USE_DART_VALIDATOR
 from task_context import TaskContext
 from utils import strip_const_declarations
 
+from task_review_manager import TaskReviewManager
+
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -179,6 +182,7 @@ def check_and_add_dependencies(project_root: str, generated_updates: Dict[str, s
 def development_loop(client: AIClient, project_root: str, flutter_process: subprocess.Popen, selected_device: str):
     task_planner = TaskPlanner(client)
     project_context_manager = ProjectContextManager(project_root)
+    review_manager = TaskReviewManager(client)  # Add this line
     task_context = TaskContext()
     logger.info(f"USE_DART_VALIDATOR setting: {USE_DART_VALIDATOR}")
     flutter_validator = FlutterProjectValidator(client) if USE_DART_VALIDATOR else None
@@ -206,6 +210,9 @@ def development_loop(client: AIClient, project_root: str, flutter_process: subpr
         try:
             task_plan = task_planner.generate_task_plan(user_input, project_context_manager.file_contents)
             logger.info(f"Generated task plan: {json.dumps(task_plan, indent=2)}")
+            task_plan = review_manager.review_task_plan(task_plan, user_input)
+            logger.info(f"Enhanced task plan: {json.dumps(task_plan, indent=2)}")
+
             print(f"Task plan: {json.dumps(task_plan, indent=2)}")
 
             if not task_plan or 'steps' not in task_plan:
